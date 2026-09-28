@@ -7,7 +7,9 @@ current day is its final scheduled day, so the next block is ready before the
 schedule runs out. Use the `/start` application
 command to publish and track the upcoming schedule, or `/continue` to append and
 publish another schedule block manually. Automatic continuations are handled by
-the daily backend. The tracked schedule post is edited after skips; each
+the daily backend. The bot checks the saved schedule every minute and edits the
+tracked schedule post when its displayed content changes, including after manual
+`edit` commands. Skip-button updates also refresh the post immediately. Each
 continuation replaces the tracked message ID with its new post.
 
 ## Setup

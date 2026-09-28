@@ -211,6 +211,7 @@ class WorkoutBot(commands.Bot):
         except discord.HTTPException:
             logger.exception("Could not sync Discord application commands")
         self.daily_workout.start()
+        self.schedule_edit_poll.start()
 
     async def on_ready(self) -> None:
         logger.info("Connected as %s", self.user)
@@ -226,6 +227,21 @@ class WorkoutBot(commands.Bot):
             await self.send_todays_workout()
         except Exception:
             logger.exception("Could not post today's workout")
+
+    @tasks.loop(minutes=15)
+    async def schedule_edit_poll(self) -> None:
+        if not SCHEDULE_FILE.exists():
+            return
+
+        async with self.schedule_lock:
+            try:
+                await self.update_tracked_schedule()
+            except (OSError, ValueError, discord.HTTPException):
+                logger.exception("Could not poll for schedule edits")
+
+    @schedule_edit_poll.before_loop
+    async def before_schedule_edit_poll(self) -> None:
+        await self.wait_until_ready()
 
     async def send_todays_workout(self) -> None:
         target_date = datetime.now(self.timezone).date()
@@ -349,10 +365,15 @@ class WorkoutBot(commands.Bot):
             upcoming_schedule,
             datetime.now(self.timezone).date(),
         )
+        content = format_schedule(entries, "Workout schedule")
+        if message.content == content:
+            return
+
         await message.edit(
-            content=format_schedule(entries, "Workout schedule"),
+            content=content,
             allowed_mentions=discord.AllowedMentions.none(),
         )
+        logger.info("Updated tracked workout schedule message %s", message_id)
 
     @staticmethod
     def error_detail(error: Exception) -> str:

@@ -220,6 +220,8 @@ class WorkoutScheduler:
         seed: int = 0,
         previous_days: list[Day] | None = None,
         config: SchedulerConfig | None = None,
+        fixed_workouts: dict[date, list[str]] | None = None,
+        edited_date: date | None = None,
     ):
         self.config = config or load_config(DEFAULT_CONFIG_FILE)
         self.start_date = start_date
@@ -231,6 +233,8 @@ class WorkoutScheduler:
         self.skip_dates = skip_dates or set()
         self.seed = seed
         self.previous_days = previous_days or []
+        self.fixed_workouts = fixed_workouts or {}
+        self.edited_date = edited_date
 
         self.dates = [
             start_date + timedelta(days=i)
@@ -251,6 +255,14 @@ class WorkoutScheduler:
                     for skipped_date in sorted(invalid_skip_dates)
                 )
             )
+
+        invalid_fixed_dates = [
+            fixed_date
+            for fixed_date in self.fixed_workouts
+            if fixed_date not in self.dates
+        ]
+        if invalid_fixed_dates:
+            raise ValueError("Fixed workouts must be within the schedule horizon.")
 
     def generate(self) -> list[Day]:
         """
@@ -319,7 +331,9 @@ class WorkoutScheduler:
         schedule = [
             Day(
                 scheduled_date,
-                ["skip"] if scheduled_date in self.skip_dates else [],
+                ["skip"]
+                if scheduled_date in self.skip_dates
+                else list(self.fixed_workouts.get(scheduled_date, [])),
             )
             for scheduled_date in self.dates
         ]
@@ -364,7 +378,11 @@ class WorkoutScheduler:
             indices = list(range(week_start, week_end))
             rng.shuffle(indices)
 
-            for _ in range(target):
+            existing_count = sum(
+                "leg" in schedule[index].workouts
+                for index in range(week_start, week_end)
+            )
+            for _ in range(max(0, target - existing_count)):
                 placed = False
 
                 for index in indices:
@@ -406,6 +424,11 @@ class WorkoutScheduler:
         for week_start in range(0, self.horizon, week_length):
             week_end = min(week_start + week_length, self.horizon)
             _, upper_max = self._upper_targets_for_block(week_start, week_end)
+            existing_count = sum(
+                "upper" in schedule[index].workouts
+                for index in range(week_start, week_end)
+            )
+            remaining_upper = max(0, upper_max - existing_count)
 
             indices = list(range(week_start, week_end))
             rng.shuffle(indices)
@@ -418,7 +441,7 @@ class WorkoutScheduler:
             placed = 0
 
             for index in indices:
-                if placed >= upper_max:
+                if placed >= remaining_upper:
                     break
 
                 # Check spacing from last upper workout
@@ -536,6 +559,7 @@ class WorkoutScheduler:
             for index, day in enumerate(schedule)
             if not day.skipped
             and "core" not in day.workouts
+            and "hip" not in day.workouts
             and (
                 "run" in day.workouts
                 or "leg" in day.workouts
@@ -605,7 +629,7 @@ class WorkoutScheduler:
                     continue
 
                 candidate_day = schedule[candidate_index]
-                if "core" in candidate_day.workouts or not (
+                if "core" in candidate_day.workouts or "hip" in candidate_day.workouts or not (
                     "run" in candidate_day.workouts
                     or "leg" in candidate_day.workouts
                     or candidate_day.workouts == ["yoga"]
@@ -638,7 +662,7 @@ class WorkoutScheduler:
         schedule: list[Day],
     ) -> None:
         for day in schedule:
-            if day.skipped:
+            if day.skipped or day.date in self.fixed_workouts:
                 continue
 
             if (
@@ -851,6 +875,9 @@ class WorkoutScheduler:
             if day.skipped and day.workouts != ["skip"]:
                 return False
 
+            if self.edited_date is not None and day.date <= self.edited_date:
+                continue
+
             if "upper" in day.workouts and "run" in day.workouts:
                 return False
 
@@ -869,6 +896,10 @@ class WorkoutScheduler:
                 self.config.fixed_run_weekday is not None
                 and day.date.weekday() == self.config.fixed_run_weekday
                 and not day.skipped
+                and (
+                    self.edited_date is None
+                    or day.date > self.edited_date
+                )
             ):
                 if "run" not in day.workouts:
                     return False
@@ -878,6 +909,12 @@ class WorkoutScheduler:
             schedule,
             "core",
         )
+        if self.edited_date is not None:
+            core_indices = [
+                index
+                for index in core_indices
+                if schedule[index].date > self.edited_date
+            ]
 
         if not self._has_minimum_spacing(
             core_indices,
@@ -897,6 +934,7 @@ class WorkoutScheduler:
         if any(
             "core" in day.workouts
             and not ("upper" in day.workouts or "yoga" in day.workouts)
+            and (self.edited_date is None or day.date > self.edited_date)
             for day in schedule
         ):
             return False
@@ -906,6 +944,12 @@ class WorkoutScheduler:
             schedule,
             "run",
         )
+        if self.edited_date is not None:
+            run_indices = [
+                index
+                for index in run_indices
+                if schedule[index].date > self.edited_date
+            ]
 
         if not self._has_minimum_spacing(
             run_indices,
@@ -917,6 +961,12 @@ class WorkoutScheduler:
             schedule,
             "leg",
         )
+        if self.edited_date is not None:
+            leg_indices = [
+                index
+                for index in leg_indices
+                if schedule[index].date > self.edited_date
+            ]
 
         if not self._has_minimum_spacing(
             leg_indices,
@@ -929,6 +979,12 @@ class WorkoutScheduler:
             schedule,
             "upper",
         )
+        if self.edited_date is not None:
+            upper_indices = [
+                index
+                for index in upper_indices
+                if schedule[index].date > self.edited_date
+            ]
 
         if not self._has_minimum_spacing(
             upper_indices,
@@ -941,6 +997,13 @@ class WorkoutScheduler:
             schedule,
             "hip",
         )
+        hip_count = len(hip_indices)
+        if self.edited_date is not None:
+            hip_indices = [
+                index
+                for index in hip_indices
+                if schedule[index].date > self.edited_date
+            ]
 
         if not self._has_minimum_spacing(
             hip_indices,
@@ -948,7 +1011,7 @@ class WorkoutScheduler:
         ):
             return False
 
-        if len(hip_indices) < self.config.minimum_hip_workouts:
+        if hip_count < self.config.minimum_hip_workouts:
             return False
 
         if self.skip_dates:
@@ -958,6 +1021,12 @@ class WorkoutScheduler:
                 week_end = min(week_start + week_length, self.horizon)
 
                 if week_end - week_start < week_length:
+                    continue
+
+                if (
+                    self.edited_date is not None
+                    and schedule[week_end - 1].date < self.edited_date
+                ):
                     continue
 
                 if self._week_has_long_skip_streak(
@@ -1336,6 +1405,78 @@ def update_schedule(
     return start_date, seed, all_skip_dates, updated_schedule
 
 
+def edit_schedule(
+    path: Path,
+    edited_date: date,
+    primary_workout: str,
+    secondary_workout: str | None = None,
+    config: SchedulerConfig | None = None,
+) -> tuple[date, int, set[date], list[Day]]:
+    """Replace one day's workouts and regenerate that date and everything after it."""
+    primary_workouts = {"leg", "run", "upper", "yoga"}
+    secondary_workouts = {"hip", "core"}
+    if primary_workout not in primary_workouts:
+        raise ValueError(
+            "Primary workout must be one of: leg, run, upper, yoga."
+        )
+    if secondary_workout is not None and secondary_workout not in secondary_workouts:
+        raise ValueError("Secondary workout must be one of: hip, core.")
+
+    state = load_state(path)
+    start_date = parse_date(state["start_date"])
+    seed = int(state["seed"])
+    horizon = int(state["horizon_days"])
+    old_skip_dates = {
+        parse_date(value)
+        for value in state.get("skip_dates", [])
+    }
+    old_schedule = schedule_from_json(state["schedule"])
+    horizon_end = start_date + timedelta(days=horizon - 1)
+
+    if not start_date <= edited_date <= horizon_end:
+        raise ValueError(
+            f"Edit date must be between {start_date} and {horizon_end}."
+        )
+
+    all_skip_dates = old_skip_dates - {edited_date}
+    fixed_workouts = {
+        day.date: list(day.workouts)
+        for day in old_schedule
+        if day.date < edited_date and day.date not in all_skip_dates
+    }
+    fixed_workouts[edited_date] = [
+        primary_workout,
+        *([secondary_workout] if secondary_workout else []),
+    ]
+
+    regenerated_schedule = WorkoutScheduler(
+        start_date=start_date,
+        skip_dates=all_skip_dates,
+        horizon=horizon,
+        seed=seed,
+        config=config,
+        fixed_workouts=fixed_workouts,
+        edited_date=edited_date,
+    ).generate()
+
+    preserved_schedule = [
+        day for day in old_schedule if day.date < edited_date
+    ]
+    updated_schedule = preserved_schedule + [
+        day for day in regenerated_schedule if day.date >= edited_date
+    ]
+
+    save_state(
+        path=path,
+        start_date=start_date,
+        seed=seed,
+        skip_dates=all_skip_dates,
+        schedule=updated_schedule,
+    )
+
+    return start_date, seed, all_skip_dates, updated_schedule
+
+
 
 def print_schedule(schedule: list[Day]) -> None:
     print()
@@ -1464,6 +1605,29 @@ def command_update(args: argparse.Namespace) -> None:
     print_schedule(schedule)
 
 
+def command_edit(args: argparse.Namespace) -> None:
+    path = Path(args.file)
+    config = load_config(Path(args.config))
+    edited_date = parse_date(args.edit_date)
+
+    start_date, seed, skip_dates, schedule = edit_schedule(
+        path=path,
+        edited_date=edited_date,
+        primary_workout=args.primary,
+        secondary_workout=args.secondary,
+        config=config,
+    )
+
+    print(f"Edited {path}")
+    print(f"Start date: {start_date}")
+    print(f"Seed: {seed}")
+    print(
+        "Skip dates: "
+        + ", ".join(str(value) for value in sorted(skip_dates))
+    )
+    print_schedule(schedule)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Deterministic rolling workout scheduler."
@@ -1565,6 +1729,42 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     update_parser.set_defaults(function=command_update)
+
+    edit_parser = subparsers.add_parser(
+        "edit",
+        help="Set a date's primary workout and optional secondary workout.",
+    )
+
+    edit_parser.add_argument(
+        "edit_date",
+        help="Date to edit in YYYY-MM-DD format.",
+    )
+
+    edit_parser.add_argument(
+        "primary",
+        choices=("leg", "run", "upper", "yoga"),
+        help="Primary workout for the date.",
+    )
+
+    edit_parser.add_argument(
+        "--secondary",
+        choices=("hip", "core"),
+        help="Optional secondary workout for the date.",
+    )
+
+    edit_parser.add_argument(
+        "--file",
+        default=str(DEFAULT_STATE_FILE),
+        help="State file path.",
+    )
+
+    edit_parser.add_argument(
+        "--config",
+        default=str(DEFAULT_CONFIG_FILE),
+        help="Scheduler config JSON path.",
+    )
+
+    edit_parser.set_defaults(function=command_edit)
 
     return parser
 

@@ -2,7 +2,14 @@
 
 The default settings are in `workout_config.json`. Generation commands read
 that file automatically; pass `--config path/to/file.json` to use another one.
-The selected config is used by `create`, `update`, and `continue`.
+The selected config is used by `create`, `update`, `edit`, and `continue`.
+
+Use `python excignment.py edit YYYY-MM-DD PRIMARY [--secondary SECONDARY]` to
+replace a date's workouts. Primary choices are `leg`, `run`, `upper`, and
+`yoga`; the optional secondary is `hip` or `core`. The selected date is counted
+as a workout day, dates before it are preserved without revalidating their
+workout conflicts, and that date onward is regenerated. The chosen combination
+is kept even if it conflicts with the scheduler's normal same-day pairing rules.
 
 Weekday numbers follow Python's convention: Monday is `0`, Sunday is `6`.
 Set `fixed_run_weekday` to `null` to disable the recurring weekday run.
