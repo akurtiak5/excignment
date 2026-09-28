@@ -41,6 +41,11 @@ continuation replaces the tracked message ID with its new post.
    `America/Los_Angeles`; it defaults to `UTC`. Keep the process running for
    scheduled posts and button interactions to work.
 
+To start the bot only when it is not already running, invoke
+`bash ensure_discord_bot.sh`. The script inherits its environment and appends
+bot output to `discord_bot.log`; run it periodically with a scheduler such as
+cron to have it bring the bot back after an unexpected exit.
+
 Optional path overrides are `WORKOUT_SCHEDULE_FILE`, `WORKOUT_CONFIG_FILE`,
 and `DISCORD_BOT_STATE_FILE`. They default to the files in this directory. The
 bot state file records the last posted date to avoid reposting after a restart.
