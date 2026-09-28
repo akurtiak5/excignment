@@ -1,0 +1,62 @@
+{
+  "horizon_days": 32,
+  "week_length_days": 7,
+  "candidate_attempts": 2000,
+  "fixed_run_weekday": 2,
+  "skip_streak_exemption_length": 4,
+  "minimum_hip_workouts": 7,
+  "weekend_days": [5, 6],
+  "skip_week_minimums": {
+    "leg": 1,
+    "run": 1,
+    "upper": 1,
+    "hip": 1
+  },
+  "weekly_targets": {
+    "leg": {
+      "target": 1
+    },
+    "run": {
+      "preferred_min": 2,
+      "preferred_max": 3
+    },
+    "upper": {
+      "preferred_min": 3,
+      "preferred_max": 3
+    }
+  },
+  "cooldown_days": {
+    "hip": 4,
+    "leg": 5,
+    "upper": 2,
+    "run": 2,
+    "core": 2
+  },
+  "preferred_hip_interval_days": 4,
+  "hip_interval_weights": [
+    {
+      "days": 4,
+      "weight": 6
+    },
+    {
+      "days": 5,
+      "weight": 2
+    },
+    {
+      "days": 6,
+      "weight": 2
+    }
+  ],
+  "score_weights": {
+    "hip_workout_reward": 60,
+    "hip_interval_deviation_penalty": 20,
+    "upper_shortfall_penalty":40,
+    "upper_excess_penalty": 25,
+    "leg_target_deviation_penalty": 15,
+    "run_shortfall_penalty": 20,
+    "run_excess_penalty": 15,
+    "combined_workout_penalty": 5,
+    "weekend_yoga_bonus": 8,
+    "weekday_yoga_penalty": 20
+  }
+}
