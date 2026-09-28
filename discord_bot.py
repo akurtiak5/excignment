@@ -110,17 +110,29 @@ def upcoming_schedule(target_date: date) -> list[dict]:
     state = read_schedule_state()
     with CONFIG_FILE.open("r", encoding="utf-8") as file:
         display_days = int(json.load(file)["horizon_days"])
-    return [
+    completed_dates = set(read_bot_state().get("completed_dates", []))
+    completed_entries = [
+        entry
+        for entry in state["schedule"]
+        if entry["date"] in completed_dates
+        and date.fromisoformat(entry["date"]) < target_date
+    ]
+    upcoming_entries = [
         entry
         for entry in state["schedule"]
         if date.fromisoformat(entry["date"]) >= target_date
     ][:display_days]
+    return [
+        *completed_entries,
+        *upcoming_entries,
+    ]
 
 
 def format_schedule(entries: list[dict], heading: str) -> str:
     if not entries:
         return f"**{heading}**\nNo scheduled days."
 
+    completed_dates = set(read_bot_state().get("completed_dates", []))
     lines = []
     for entry in entries:
         scheduled_date = date.fromisoformat(entry["date"])
@@ -131,7 +143,12 @@ def format_schedule(entries: list[dict], heading: str) -> str:
             description = " + ".join(
                 WORKOUT_NAMES.get(workout, workout.title()) for workout in workouts
             ) or "Rest day"
-        lines.append(f"{scheduled_date:%a %b %-d}: {description}")
+        checkmark = (
+            "\N{WHITE HEAVY CHECK MARK} "
+            if entry["date"] in completed_dates
+            else ""
+        )
+        lines.append(f"{checkmark}{scheduled_date:%a %b %-d}: {description}")
 
     return f"**{heading}**\n" + "\n".join(lines)
 
@@ -159,7 +176,8 @@ def format_workout(target_date: date) -> str:
 def read_bot_state() -> dict:
     try:
         with BOT_STATE_FILE.open("r", encoding="utf-8") as file:
-            return json.load(file)
+            contents = file.read()
+            return json.loads(contents) if contents.strip() else {}
     except FileNotFoundError:
         return {}
 
@@ -171,6 +189,17 @@ def write_bot_state(state: dict) -> None:
         json.dump(state, file, indent=2)
         file.write("\n")
     temporary_file.replace(BOT_STATE_FILE)
+
+
+def daily_workout_view(workout_date: date, completed: bool = False) -> discord.ui.View:
+    view = discord.ui.View(timeout=None)
+    complete_button = CompleteWorkoutButton(workout_date)
+    skip_button = SkipWorkoutButton(workout_date)
+    complete_button.disabled = completed
+    skip_button.disabled = completed
+    view.add_item(complete_button)
+    view.add_item(skip_button)
+    return view
 
 
 def skip_date(target_date: date) -> list[list[dict]]:
@@ -205,7 +234,7 @@ class WorkoutBot(commands.Bot):
             await self.continue_schedule_command(interaction)
 
     async def setup_hook(self) -> None:
-        self.add_dynamic_items(SkipWorkoutButton)
+        self.add_dynamic_items(CompleteWorkoutButton, SkipWorkoutButton)
         try:
             await self.tree.sync()
         except discord.HTTPException:
@@ -262,11 +291,9 @@ class WorkoutBot(commands.Bot):
             channel = self.get_channel(self.channel_id)
             if channel is None:
                 channel = await self.fetch_channel(self.channel_id)
-            view = discord.ui.View(timeout=None)
-            view.add_item(SkipWorkoutButton(target_date))
             await channel.send(
                 content=format_workout(target_date),
-                view=view,
+                view=daily_workout_view(target_date),
                 allowed_mentions=discord.AllowedMentions.none(),
             )
             state["last_sent_date"] = target_date.isoformat()
@@ -413,6 +440,12 @@ class SkipWorkoutButton(
             )
             return
 
+        if self.workout_date.isoformat() in read_bot_state().get("completed_dates", []):
+            await interaction.response.send_message(
+                "This workout is already marked complete.", ephemeral=True
+            )
+            return
+
         today = datetime.now(bot.timezone).date()
         if self.workout_date != today:
             await interaction.response.send_message(
@@ -451,6 +484,75 @@ class SkipWorkoutButton(
                 )
             await interaction.followup.send(
                 f"{self.workout_date:%A, %B %-d} is now a skip day, and the schedule has been updated.",
+                ephemeral=True,
+            )
+
+
+class CompleteWorkoutButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"complete-workout:(?P<workout_date>\d{4}-\d{2}-\d{2})",
+):
+    def __init__(self, workout_date: date):
+        self.workout_date = workout_date
+        super().__init__(
+            discord.ui.Button(
+                label="Complete",
+                style=discord.ButtonStyle.success,
+                custom_id=f"complete-workout:{workout_date.isoformat()}",
+            )
+        )
+
+    @classmethod
+    async def from_custom_id(
+        cls,
+        interaction: discord.Interaction,
+        item: discord.ui.Button,
+        match: re.Match[str],
+    ) -> CompleteWorkoutButton:
+        return cls(date.fromisoformat(match["workout_date"]))
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        bot = interaction.client
+        if not isinstance(bot, WorkoutBot):
+            await interaction.response.send_message(
+                "The workout bot is unavailable.", ephemeral=True
+            )
+            return
+
+        today = datetime.now(bot.timezone).date()
+        if self.workout_date > today:
+            await interaction.response.send_message(
+                "A future workout cannot be marked complete.", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        async with bot.schedule_lock:
+            try:
+                state = read_bot_state()
+                completed_dates = set(state.get("completed_dates", []))
+                completed_dates.add(self.workout_date.isoformat())
+                state["completed_dates"] = sorted(completed_dates)
+                write_bot_state(state)
+
+                if interaction.message is not None:
+                    await interaction.message.edit(
+                        content=format_workout(self.workout_date),
+                        view=daily_workout_view(self.workout_date, completed=True),
+                    )
+                await bot.update_tracked_schedule()
+            except (OSError, ValueError, discord.HTTPException) as error:
+                logger.exception(
+                    "Could not mark %s as complete", self.workout_date
+                )
+                await interaction.followup.send(
+                    f"Could not update the schedule: {bot.error_detail(error)}",
+                    ephemeral=True,
+                )
+                return
+
+            await interaction.followup.send(
+                f"{self.workout_date:%A, %B %-d} is marked complete.",
                 ephemeral=True,
             )
 

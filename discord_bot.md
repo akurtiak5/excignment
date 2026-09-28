@@ -1,16 +1,20 @@
 # Discord Workout Bot
 
-The bot posts the day's workout at 5:00 AM in the configured timezone. Its
-button marks that date as a skip day in `workout_schedule.json` and regenerates
-the affected schedule. The bot extends the schedule automatically whenever the
+The bot posts the day's workout at 5:00 AM in the configured timezone. Each
+daily message has a green Complete button and a red Skip today button. Complete
+marks the workout done, disables both buttons on that message, and adds a green
+checkmark beside the date in the tracked schedule. Completion buttons remain
+usable on past daily messages, so missed check-ins can be recorded later. Skip
+marks that date as a skip day in `workout_schedule.json` and regenerates the
+affected schedule. The bot extends the schedule automatically whenever the
 current day is its final scheduled day, so the next block is ready before the
-schedule runs out. Use the `/start` application
-command to publish and track the upcoming schedule, or `/continue` to append and
-publish another schedule block manually. Automatic continuations are handled by
-the daily backend. The bot checks the saved schedule every minute and edits the
-tracked schedule post when its displayed content changes, including after manual
-`edit` commands. Skip-button updates also refresh the post immediately. Each
-continuation replaces the tracked message ID with its new post.
+schedule runs out. Use the `/start` application command to publish and track the
+upcoming schedule, or `/continue` to append and publish another schedule block
+manually. Automatic continuations are handled by the daily backend. The bot
+checks the saved schedule every minute and edits the tracked schedule post when
+its displayed content changes, including after manual `edit` commands. Button
+updates also refresh the post immediately. Each continuation replaces the
+tracked message ID with its new post.
 
 ## Setup
 
