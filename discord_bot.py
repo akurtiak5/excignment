@@ -245,15 +245,13 @@ class WorkoutBot(commands.Bot):
         self.daily_workout.start()
         self.schedule_edit_poll.start()
 
-    async def on_ready(self) -> None:
-        logger.info("Connected as %s", self.user)
-        if datetime.now(self.timezone).hour >= 5:
-            try:
-                await self.send_todays_workout()
-            except Exception:
-                logger.exception("Could not post today's workout")
-
-    @tasks.loop(time=time(hour=5, minute=0, tzinfo=SCHEDULE_TIMEZONE))
+    @tasks.loop(
+        time=[
+            time(hour=hour, minute=minute, tzinfo=SCHEDULE_TIMEZONE)
+            for hour in range(5, 24)
+            for minute in range(0, 60, 10)
+        ]
+    )
     async def daily_workout(self) -> None:
         try:
             await self.send_todays_workout()
