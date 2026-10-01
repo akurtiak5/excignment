@@ -148,7 +148,10 @@ def format_schedule(entries: list[dict], heading: str) -> str:
             if entry["date"] in completed_dates
             else ""
         )
-        lines.append(f"{checkmark}{scheduled_date:%a %b %-d}: {description}")
+        skip_marker = "\N{CROSS MARK} " if workouts == ["skip"] else ""
+        lines.append(
+            f"{skip_marker}{checkmark}{scheduled_date:%a %b %-d}: {description}"
+        )
 
     return f"**{heading}**\n" + "\n".join(lines)
 

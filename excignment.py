@@ -558,6 +558,7 @@ class WorkoutScheduler:
             index
             for index, day in enumerate(schedule)
             if not day.skipped
+            and day.date not in self.fixed_workouts
             and "core" not in day.workouts
             and "hip" not in day.workouts
             and (
@@ -759,7 +760,7 @@ class WorkoutScheduler:
         ]
 
         for index, day in enumerate(schedule):
-            if day.workouts != ["yoga"]:
+            if day.date in self.fixed_workouts or day.workouts != ["yoga"]:
                 continue
 
             if any(
