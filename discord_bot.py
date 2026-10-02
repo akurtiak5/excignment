@@ -114,7 +114,10 @@ def upcoming_schedule(target_date: date) -> list[dict]:
     completed_entries = [
         entry
         for entry in state["schedule"]
-        if entry["date"] in completed_dates
+        if (
+            entry["date"] in completed_dates
+            or entry["workouts"] == ["skip"]
+        )
         and date.fromisoformat(entry["date"]) < target_date
     ]
     upcoming_entries = [
@@ -209,6 +212,25 @@ def skip_date(target_date: date) -> list[list[dict]]:
     continued_schedules = ensure_schedule_contains(target_date)
     if workout_for(target_date) == ["skip"]:
         return continued_schedules
+
+    state = read_schedule_state()
+    later_skip_dates = {
+        date.fromisoformat(value)
+        for value in state.get("skip_dates", [])
+        if date.fromisoformat(value) > target_date
+    }
+    later_skip_dates.update(
+        date.fromisoformat(entry["date"])
+        for entry in state["schedule"]
+        if entry["workouts"] == ["skip"]
+        and date.fromisoformat(entry["date"]) > target_date
+    )
+    if later_skip_dates:
+        first_later_skip = min(later_skip_dates)
+        raise ValueError(
+            f"Cannot skip {target_date}: {first_later_skip} is already a later skip day."
+        )
+
     run_scheduler("update", target_date.isoformat())
     return continued_schedules
 
@@ -444,14 +466,6 @@ class SkipWorkoutButton(
         if self.workout_date.isoformat() in read_bot_state().get("completed_dates", []):
             await interaction.response.send_message(
                 "This workout is already marked complete.", ephemeral=True
-            )
-            return
-
-        today = datetime.now(bot.timezone).date()
-        if self.workout_date != today:
-            await interaction.response.send_message(
-                "This button is only available on its scheduled day.",
-                ephemeral=True,
             )
             return
 
