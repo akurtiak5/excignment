@@ -69,7 +69,7 @@ def run_scheduler(*arguments: str) -> None:
             *(
                 ["--config", str(CONFIG_FILE)]
                 if any(
-                    argument in {"create", "update", "continue"}
+                    argument in {"create", "update", "continue", "edit"}
                     for argument in arguments
                 )
                 else []
@@ -258,6 +258,35 @@ class WorkoutBot(commands.Bot):
         async def continue_command(interaction: discord.Interaction) -> None:
             await self.continue_schedule_command(interaction)
 
+        @self.tree.command(
+            name="edit",
+            description="Edit a scheduled day's workout",
+        )
+        @discord.app_commands.choices(
+            primary=[
+                discord.app_commands.Choice(name="Leg", value="leg"),
+                discord.app_commands.Choice(name="Run", value="run"),
+                discord.app_commands.Choice(name="Upper body", value="upper"),
+                discord.app_commands.Choice(name="Yoga", value="yoga"),
+            ],
+            secondary=[
+                discord.app_commands.Choice(name="Hip", value="hip"),
+                discord.app_commands.Choice(name="Core", value="core"),
+            ],
+        )
+        async def edit_command(
+            interaction: discord.Interaction,
+            edit_date: str,
+            primary: discord.app_commands.Choice[str],
+            secondary: discord.app_commands.Choice[str] | None = None,
+        ) -> None:
+            await self.edit_schedule_command(
+                interaction,
+                edit_date,
+                primary.value,
+                secondary.value if secondary is not None else None,
+            )
+
     async def setup_hook(self) -> None:
         self.add_dynamic_items(CompleteWorkoutButton, SkipWorkoutButton)
         try:
@@ -381,6 +410,53 @@ class WorkoutBot(commands.Bot):
 
             await interaction.followup.send(
                 f"Continuation posted and tracked as message {message.id}.",
+                ephemeral=True,
+            )
+
+    async def edit_schedule_command(
+        self,
+        interaction: discord.Interaction,
+        edit_date: str,
+        primary_workout: str,
+        secondary_workout: str | None,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+        async with self.schedule_lock:
+            try:
+                if not SCHEDULE_FILE.exists():
+                    await interaction.followup.send(
+                        "No schedule exists yet. Run /start first.", ephemeral=True
+                    )
+                    return
+
+                await asyncio.to_thread(
+                    run_scheduler,
+                    "edit",
+                    edit_date,
+                    primary_workout,
+                    *([secondary_workout] if secondary_workout else []),
+                )
+                await self.update_tracked_schedule()
+            except (
+                OSError,
+                ValueError,
+                subprocess.CalledProcessError,
+                discord.HTTPException,
+            ) as error:
+                logger.exception("Could not edit the schedule for %s", edit_date)
+                await interaction.followup.send(
+                    f"Could not edit the schedule: {self.error_detail(error)}",
+                    ephemeral=True,
+                )
+                return
+
+            secondary_text = (
+                f" + {secondary_workout.title()}"
+                if secondary_workout
+                else ""
+            )
+            await interaction.followup.send(
+                f"Updated {edit_date} to {primary_workout.title()}{secondary_text}.",
                 ephemeral=True,
             )
 
