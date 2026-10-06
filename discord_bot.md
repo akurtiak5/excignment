@@ -9,12 +9,13 @@ marks that date as a skip day in `workout_schedule.json` and regenerates the
 affected schedule. The bot extends the schedule automatically whenever the
 current day is its final scheduled day, so the next block is ready before the
 schedule runs out. Use the `/start` application command to publish and track the
-upcoming schedule, or `/continue` to append and publish another schedule block
-manually. Automatic continuations are handled by the daily backend. The bot
-checks the saved schedule every minute and edits the tracked schedule post when
-its displayed content changes, including after manual `edit` commands. Button
-updates also refresh the post immediately. Each continuation replaces the
-tracked message ID with its new post.
+upcoming schedule, `/continue` to append and publish another schedule block
+manually, or `/reroll` to choose an eligible alternate workout for today and
+regenerate the schedule. Automatic continuations are handled by the daily
+backend. The bot checks the saved schedule every minute and edits the tracked
+schedule post when its displayed content changes, including after manual `edit`
+commands. Button updates also refresh the post immediately. Each continuation
+replaces the tracked message ID with its new post.
 
 ## Setup
 

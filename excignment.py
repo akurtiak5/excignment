@@ -1423,6 +1423,75 @@ def edit_schedule(
     if secondary_workout is not None and secondary_workout not in secondary_workouts:
         raise ValueError("Secondary workout must be one of: hip, core.")
 
+    start_date, seed, all_skip_dates, updated_schedule = _generate_edited_schedule(
+        path,
+        edited_date,
+        primary_workout,
+        secondary_workout,
+        config,
+    )
+    save_state(
+        path=path,
+        start_date=start_date,
+        seed=seed,
+        skip_dates=all_skip_dates,
+        schedule=updated_schedule,
+    )
+
+    return start_date, seed, all_skip_dates, updated_schedule
+
+
+def eligible_reroll_workouts(
+    path: Path,
+    reroll_date: date,
+    config: SchedulerConfig | None = None,
+) -> list[str]:
+    """Return alternate primary workouts that can regenerate a valid schedule."""
+    state = load_state(path)
+    current_schedule = schedule_from_json(state["schedule"])
+    current_day = next(
+        (day for day in current_schedule if day.date == reroll_date),
+        None,
+    )
+    primary_workouts = ("leg", "run", "upper", "yoga")
+    if current_day is None or current_day.skipped:
+        return []
+
+    current_primary = next(
+        (workout for workout in primary_workouts if workout in current_day.workouts),
+        None,
+    )
+    if current_primary is None:
+        return []
+
+    eligible = []
+    for candidate in primary_workouts:
+        if candidate == current_primary:
+            continue
+
+        secondary = "core" if candidate == "upper" else None
+        try:
+            _generate_edited_schedule(
+                path,
+                reroll_date,
+                candidate,
+                secondary,
+                config,
+            )
+        except RuntimeError:
+            continue
+        eligible.append(candidate)
+
+    return eligible
+
+
+def _generate_edited_schedule(
+    path: Path,
+    edited_date: date,
+    primary_workout: str,
+    secondary_workout: str | None,
+    config: SchedulerConfig | None,
+) -> tuple[date, int, set[date], list[Day]]:
     state = load_state(path)
     start_date = parse_date(state["start_date"])
     seed = int(state["seed"])
@@ -1466,14 +1535,6 @@ def edit_schedule(
     updated_schedule = preserved_schedule + [
         day for day in regenerated_schedule if day.date >= edited_date
     ]
-
-    save_state(
-        path=path,
-        start_date=start_date,
-        seed=seed,
-        skip_dates=all_skip_dates,
-        schedule=updated_schedule,
-    )
 
     return start_date, seed, all_skip_dates, updated_schedule
 

@@ -14,6 +14,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import discord
 from discord.ext import commands, tasks
 
+from excignment import eligible_reroll_workouts, load_config
+
 
 ROOT = Path(__file__).resolve().parent
 SCHEDULER = ROOT / "excignment.py"
@@ -47,6 +49,23 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 logger = logging.getLogger("workout-discord")
+AUTHORIZED_USER_ID = 412752659234160650
+
+
+async def authorize_interaction(interaction: discord.Interaction) -> bool:
+    if interaction.user.id == AUTHORIZED_USER_ID:
+        return True
+
+    await interaction.response.send_message(
+        "This bot is only available to its owner.",
+        ephemeral=True,
+    )
+    return False
+
+
+class WorkoutCommandTree(discord.app_commands.CommandTree):
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await authorize_interaction(interaction)
 
 
 def resolve_path(path: Path) -> Path:
@@ -237,7 +256,11 @@ def skip_date(target_date: date) -> list[list[dict]]:
 
 class WorkoutBot(commands.Bot):
     def __init__(self, timezone: ZoneInfo):
-        super().__init__(command_prefix="!", intents=discord.Intents.none())
+        super().__init__(
+            command_prefix="!",
+            intents=discord.Intents.none(),
+            tree_cls=WorkoutCommandTree,
+        )
         self.timezone = timezone
         self.schedule_lock = asyncio.Lock()
         self.channel_id = int(os.environ["DISCORD_CHANNEL_ID"])
@@ -286,6 +309,13 @@ class WorkoutBot(commands.Bot):
                 primary.value,
                 secondary.value if secondary is not None else None,
             )
+
+        @self.tree.command(
+            name="reroll",
+            description="Choose another eligible workout for today",
+        )
+        async def reroll_command(interaction: discord.Interaction) -> None:
+            await self.reroll_schedule_command(interaction)
 
     async def setup_hook(self) -> None:
         self.add_dynamic_items(CompleteWorkoutButton, SkipWorkoutButton)
@@ -434,7 +464,11 @@ class WorkoutBot(commands.Bot):
                     "edit",
                     edit_date,
                     primary_workout,
-                    *([secondary_workout] if secondary_workout else []),
+                    *(
+                        ["--secondary", secondary_workout]
+                        if secondary_workout
+                        else []
+                    ),
                 )
                 await self.update_tracked_schedule()
             except (
@@ -459,6 +493,48 @@ class WorkoutBot(commands.Bot):
                 f"Updated {edit_date} to {primary_workout.title()}{secondary_text}.",
                 ephemeral=True,
             )
+
+    async def reroll_schedule_command(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+        reroll_date = datetime.now(self.timezone).date()
+        async with self.schedule_lock:
+            try:
+                if not SCHEDULE_FILE.exists():
+                    await interaction.followup.send(
+                        "No schedule exists yet. Run /start first.", ephemeral=True
+                    )
+                    return
+
+                eligible = await asyncio.to_thread(
+                    eligible_reroll_workouts,
+                    SCHEDULE_FILE,
+                    reroll_date,
+                    load_config(CONFIG_FILE),
+                )
+            except (OSError, ValueError, RuntimeError) as error:
+                logger.exception("Could not find reroll options for %s", reroll_date)
+                await interaction.followup.send(
+                    f"Could not check reroll options: {self.error_detail(error)}",
+                    ephemeral=True,
+                )
+                return
+
+        if not eligible:
+            await interaction.followup.send(
+                f"No other eligible workouts are available for {reroll_date}.",
+                ephemeral=True,
+            )
+            return
+
+        view = RerollWorkoutView(self, reroll_date, eligible)
+        await interaction.followup.send(
+            "Choose another eligible workout for today:",
+            view=view,
+            ephemeral=True,
+        )
 
     async def post_tracked_schedule(
         self,
@@ -508,6 +584,105 @@ class WorkoutBot(commands.Bot):
         return str(error)
 
 
+class RerollWorkoutView(discord.ui.View):
+    def __init__(
+        self,
+        bot: WorkoutBot,
+        reroll_date: date,
+        eligible_workouts: list[str],
+    ):
+        super().__init__(timeout=180)
+        self.add_item(RerollWorkoutSelect(bot, reroll_date, eligible_workouts))
+
+
+class RerollWorkoutSelect(discord.ui.Select):
+    def __init__(
+        self,
+        bot: WorkoutBot,
+        reroll_date: date,
+        eligible_workouts: list[str],
+    ):
+        self.bot = bot
+        self.reroll_date = reroll_date
+        super().__init__(
+            placeholder="Choose today's workout",
+            min_values=1,
+            max_values=1,
+            options=[
+                discord.SelectOption(
+                    label=WORKOUT_NAMES[workout],
+                    value=workout,
+                )
+                for workout in eligible_workouts
+            ],
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if not await authorize_interaction(interaction):
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        selected_workout = self.values[0]
+        async with self.bot.schedule_lock:
+            try:
+                if datetime.now(self.bot.timezone).date() != self.reroll_date:
+                    await interaction.followup.send(
+                        "This reroll menu has expired. Run /reroll again.",
+                        ephemeral=True,
+                    )
+                    return
+
+                eligible = await asyncio.to_thread(
+                    eligible_reroll_workouts,
+                    SCHEDULE_FILE,
+                    self.reroll_date,
+                    load_config(CONFIG_FILE),
+                )
+                if selected_workout not in eligible:
+                    await interaction.followup.send(
+                        "That workout is no longer eligible. Run /reroll again.",
+                        ephemeral=True,
+                    )
+                    return
+
+                scheduler_arguments = [
+                    "edit",
+                    self.reroll_date.isoformat(),
+                    selected_workout,
+                ]
+                if selected_workout == "upper":
+                    scheduler_arguments.extend(["--secondary", "core"])
+
+                await asyncio.to_thread(run_scheduler, *scheduler_arguments)
+                await self.bot.update_tracked_schedule()
+            except (
+                OSError,
+                ValueError,
+                RuntimeError,
+                subprocess.CalledProcessError,
+                discord.HTTPException,
+            ) as error:
+                logger.exception(
+                    "Could not reroll the workout for %s", self.reroll_date
+                )
+                await interaction.followup.send(
+                    f"Could not reroll the workout: {self.bot.error_detail(error)}",
+                    ephemeral=True,
+                )
+                return
+
+        try:
+            await interaction.edit_original_response(view=None)
+        except discord.HTTPException:
+            logger.warning("Could not dismiss the used reroll menu")
+
+        await interaction.followup.send(
+            f"Rerolled today's workout to {WORKOUT_NAMES[selected_workout]}; "
+            "the schedule has been regenerated.",
+            ephemeral=True,
+        )
+
+
 class SkipWorkoutButton(
     discord.ui.DynamicItem[discord.ui.Button],
     template=r"skip-workout:(?P<workout_date>\d{4}-\d{2}-\d{2})",
@@ -532,6 +707,9 @@ class SkipWorkoutButton(
         return cls(date.fromisoformat(match["workout_date"]))
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        if not await authorize_interaction(interaction):
+            return
+
         bot = interaction.client
         if not isinstance(bot, WorkoutBot):
             await interaction.response.send_message(
@@ -603,6 +781,9 @@ class CompleteWorkoutButton(
         return cls(date.fromisoformat(match["workout_date"]))
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        if not await authorize_interaction(interaction):
+            return
+
         bot = interaction.client
         if not isinstance(bot, WorkoutBot):
             await interaction.response.send_message(
