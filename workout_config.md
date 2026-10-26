@@ -23,7 +23,9 @@ are hard minimums for each complete week block when a schedule contains skips. A
 week block containing any skipped date is exempt. An incomplete trailing block is
 also exempt, as is any block touched by a consecutive skip run at least
 `skip_streak_exemption_length` days long.
-`minimum_hip_workouts` is a separate total minimum for the full generated horizon.
+`minimum_hip_workouts` is a total minimum for the full generated horizon, scaled
+in proportion to the complete week blocks that are not exempt from skip-week
+minimums.
 Hip work is secondary: it is added only to run or leg days. A four-day hip
 cooldown and preferred interval yields roughly 1.5-2 hip sessions per week.
 

@@ -1012,7 +1012,27 @@ class WorkoutScheduler:
         ):
             return False
 
-        if hip_count < self.config.minimum_hip_workouts:
+        minimum_hip_workouts = self.config.minimum_hip_workouts
+        if self.skip_dates:
+            week_length = self.config.week_length_days
+            full_week_blocks = [
+                (week_start, week_start + week_length)
+                for week_start in range(0, self.horizon, week_length)
+                if min(week_start + week_length, self.horizon) - week_start
+                == week_length
+            ]
+            if full_week_blocks:
+                eligible_week_count = sum(
+                    not self._week_is_skip_exempt(schedule, week_start, week_end)
+                    for week_start, week_end in full_week_blocks
+                )
+                minimum_hip_workouts = (
+                    self.config.minimum_hip_workouts * eligible_week_count
+                    + len(full_week_blocks)
+                    - 1
+                ) // len(full_week_blocks)
+
+        if hip_count < minimum_hip_workouts:
             return False
 
         if self.skip_dates:
@@ -1030,12 +1050,7 @@ class WorkoutScheduler:
                 ):
                     continue
 
-                if any(
-                    schedule[index].skipped
-                    for index in range(week_start, week_end)
-                ) or self._week_has_long_skip_streak(
-                    schedule, week_start, week_end
-                ):
+                if self._week_is_skip_exempt(schedule, week_start, week_end):
                     continue
 
                 for workout, minimum in self.config.skip_week_minimums.items():
@@ -1047,6 +1062,17 @@ class WorkoutScheduler:
                         return False
 
         return True
+
+    def _week_is_skip_exempt(
+        self,
+        schedule: list[Day],
+        week_start: int,
+        week_end: int,
+    ) -> bool:
+        return any(
+            schedule[index].skipped
+            for index in range(week_start, week_end)
+        ) or self._week_has_long_skip_streak(schedule, week_start, week_end)
 
     def _week_has_long_skip_streak(
         self,
