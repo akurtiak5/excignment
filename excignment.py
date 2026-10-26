@@ -1030,10 +1030,11 @@ class WorkoutScheduler:
                 ):
                     continue
 
-                if self._week_has_long_skip_streak(
-                    schedule,
-                    week_start,
-                    week_end,
+                if any(
+                    schedule[index].skipped
+                    for index in range(week_start, week_end)
+                ) or self._week_has_long_skip_streak(
+                    schedule, week_start, week_end
                 ):
                     continue
 

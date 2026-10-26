@@ -19,9 +19,10 @@ Set `fixed_run_weekday` to `null` to disable the recurring weekday run.
 controls how many deterministic candidate schedules are compared.
 
 `weekly_targets` are preferred placement and scoring targets. `skip_week_minimums`
-are hard minimums for each complete week block when a schedule contains skips. An
-incomplete trailing block is exempt, as is a block touched by a consecutive skip
-run at least `skip_streak_exemption_length` days long.
+are hard minimums for each complete week block when a schedule contains skips. A
+week block containing any skipped date is exempt. An incomplete trailing block is
+also exempt, as is any block touched by a consecutive skip run at least
+`skip_streak_exemption_length` days long.
 `minimum_hip_workouts` is a separate total minimum for the full generated horizon.
 Hip work is secondary: it is added only to run or leg days. A four-day hip
 cooldown and preferred interval yields roughly 1.5-2 hip sessions per week.
