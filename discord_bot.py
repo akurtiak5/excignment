@@ -119,6 +119,12 @@ def ensure_schedule_contains(target_date: date) -> list[list[dict]]:
         continued_schedules.append(continued_state["schedule"][previous_length:])
 
 
+def latest_schedule_block() -> list[dict]:
+    schedule = read_schedule_state()["schedule"]
+    block_size = load_config(CONFIG_FILE).horizon_days
+    return schedule[-block_size:]
+
+
 def upcoming_schedule(target_date: date) -> list[dict]:
     state = read_schedule_state()
     with CONFIG_FILE.open("r", encoding="utf-8") as file:
@@ -170,6 +176,25 @@ def format_schedule(entries: list[dict], heading: str) -> str:
         )
 
     return f"**{heading}**\n" + "\n".join(lines)
+
+
+def split_schedule_content(content: str, max_length: int = 1900) -> list[str]:
+    lines = content.splitlines()
+    if len(lines) < 2:
+        return [content]
+
+    heading = lines[0]
+    pages = []
+    current_lines = [heading]
+    for line in lines[1:]:
+        candidate = "\n".join([*current_lines, line])
+        if len(candidate) > max_length and len(current_lines) > 1:
+            pages.append("\n".join(current_lines))
+            current_lines = [heading, line]
+        else:
+            current_lines.append(line)
+    pages.append("\n".join(current_lines))
+    return pages
 
 
 def workout_for(target_date: date) -> list[str]:
@@ -270,10 +295,17 @@ class WorkoutBot(commands.Bot):
 
         @self.tree.command(
             name="continue",
-            description="Extend and post the workout schedule",
+            description="Post the latest workout schedule block",
         )
         async def continue_command(interaction: discord.Interaction) -> None:
             await self.continue_schedule_command(interaction)
+
+        @self.tree.command(
+            name="view",
+            description="Post the full workout schedule history",
+        )
+        async def view_command(interaction: discord.Interaction) -> None:
+            await self.view_schedule_command(interaction)
 
         @self.tree.command(
             name="edit",
@@ -421,23 +453,10 @@ class WorkoutBot(commands.Bot):
                         "No schedule exists yet. Run /start first.", ephemeral=True
                     )
                     return
-                state = read_bot_state()
-                tracked_message_id = state.get("schedule_message_id")
-                if tracked_message_id is None:
-                    await interaction.followup.send(
-                        "No tracked schedule message exists. Run /start first.",
-                        ephemeral=True,
-                    )
-                    return
-
-                channel = self.get_channel(self.channel_id)
-                if channel is None:
-                    channel = await self.fetch_channel(self.channel_id)
-                tracked_message = await channel.fetch_message(
-                    int(tracked_message_id)
-                )
-                message = await self.post_tracked_schedule_content(
-                    tracked_message.content
+                entries = await asyncio.to_thread(latest_schedule_block)
+                message = await self.post_tracked_schedule(
+                    entries,
+                    "Continued workout schedule",
                 )
             except (
                 OSError,
@@ -453,6 +472,37 @@ class WorkoutBot(commands.Bot):
 
             await interaction.followup.send(
                 f"Schedule reposted and tracked as message {message.id}.",
+                ephemeral=True,
+            )
+
+    async def view_schedule_command(
+        self,
+        interaction: discord.Interaction,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+        async with self.schedule_lock:
+            try:
+                if not SCHEDULE_FILE.exists():
+                    await interaction.followup.send(
+                        "No schedule exists yet. Run /start first.", ephemeral=True
+                    )
+                    return
+
+                state = await asyncio.to_thread(read_schedule_state)
+                pages = split_schedule_content(
+                    format_schedule(state["schedule"], "Full workout schedule")
+                )
+                for page in pages:
+                    await self.post_schedule_content(page)
+            except (OSError, ValueError, discord.HTTPException) as error:
+                await interaction.followup.send(
+                    f"Could not post the full schedule: {self.error_detail(error)}",
+                    ephemeral=True,
+                )
+                return
+
+            await interaction.followup.send(
+                f"Full schedule posted in {len(pages)} message(s). Tracking was not changed.",
                 ephemeral=True,
             )
 
@@ -559,17 +609,20 @@ class WorkoutBot(commands.Bot):
         )
 
     async def post_tracked_schedule_content(self, content: str) -> discord.Message:
-        channel = self.get_channel(self.channel_id)
-        if channel is None:
-            channel = await self.fetch_channel(self.channel_id)
-        message = await channel.send(
-            content=content,
-            allowed_mentions=discord.AllowedMentions.none(),
-        )
+        message = await self.post_schedule_content(content)
         state = read_bot_state()
         state["schedule_message_id"] = message.id
         write_bot_state(state)
         return message
+
+    async def post_schedule_content(self, content: str) -> discord.Message:
+        channel = self.get_channel(self.channel_id)
+        if channel is None:
+            channel = await self.fetch_channel(self.channel_id)
+        return await channel.send(
+            content=content,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
 
     async def update_tracked_schedule(self) -> None:
         state = read_bot_state()

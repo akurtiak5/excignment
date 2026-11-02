@@ -2,17 +2,19 @@
 
 The bot posts the day's workout at 5:00 AM in the configured timezone. Each
 daily message has a green Complete button and a red Skip today button. Complete
-marks the workout done, disables both buttons on that message, and adds a green
+marks the workout done, removes both buttons from that message, and adds a green
 checkmark beside the date in the tracked schedule. Completion buttons remain
 usable on past daily messages, so missed check-ins can be recorded later. Skip
 marks that date as a skip day in `workout_schedule.json` and regenerates the
 affected schedule. The bot extends the schedule automatically whenever the
 current day is its final scheduled day, so the next block is ready before the
 schedule runs out. Use the `/start` application command to publish and track the
-upcoming schedule, `/continue` to repost the tracked schedule with its current
-history and move tracking to the new message, or `/reroll` to choose an eligible
-alternate workout for today and regenerate the schedule. `/continue` does not
-extend the schedule; automatic continuations are handled by the daily backend.
+upcoming schedule, `/continue` to repost the latest configured schedule block
+and move tracking to the new message, `/view` to post the full schedule history
+across as many messages as needed without changing tracking, or `/reroll` to
+choose an eligible alternate workout for today and regenerate the schedule.
+`/continue` does not extend the schedule;
+automatic continuations are handled by the daily backend.
 The bot checks the saved schedule every minute and edits the tracked
 schedule post when its displayed content changes, including after manual `edit`
 commands. Button updates also refresh the post immediately. Each continuation
