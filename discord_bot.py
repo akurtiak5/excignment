@@ -828,7 +828,7 @@ class CompleteWorkoutButton(
                 if interaction.message is not None:
                     await interaction.message.edit(
                         content=format_workout(self.workout_date),
-                        view=daily_workout_view(self.workout_date, completed=True),
+                        view=None,
                     )
                 await bot.update_tracked_schedule()
             except (OSError, ValueError, discord.HTTPException) as error:
