@@ -251,24 +251,6 @@ def skip_date(target_date: date) -> list[list[dict]]:
     if workout_for(target_date) == ["skip"]:
         return continued_schedules
 
-    state = read_schedule_state()
-    later_skip_dates = {
-        date.fromisoformat(value)
-        for value in state.get("skip_dates", [])
-        if date.fromisoformat(value) > target_date
-    }
-    later_skip_dates.update(
-        date.fromisoformat(entry["date"])
-        for entry in state["schedule"]
-        if entry["workouts"] == ["skip"]
-        and date.fromisoformat(entry["date"]) > target_date
-    )
-    if later_skip_dates:
-        first_later_skip = min(later_skip_dates)
-        raise ValueError(
-            f"Cannot skip {target_date}: {first_later_skip} is already a later skip day."
-        )
-
     run_scheduler("update", target_date.isoformat())
     return continued_schedules
 
