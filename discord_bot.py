@@ -125,31 +125,6 @@ def latest_schedule_block() -> list[dict]:
     return schedule[-block_size:]
 
 
-def upcoming_schedule(target_date: date) -> list[dict]:
-    state = read_schedule_state()
-    with CONFIG_FILE.open("r", encoding="utf-8") as file:
-        display_days = int(json.load(file)["horizon_days"])
-    completed_dates = set(read_bot_state().get("completed_dates", []))
-    completed_entries = [
-        entry
-        for entry in state["schedule"]
-        if (
-            entry["date"] in completed_dates
-            or entry["workouts"] == ["skip"]
-        )
-        and date.fromisoformat(entry["date"]) < target_date
-    ]
-    upcoming_entries = [
-        entry
-        for entry in state["schedule"]
-        if date.fromisoformat(entry["date"]) >= target_date
-    ][:display_days]
-    return [
-        *completed_entries,
-        *upcoming_entries,
-    ]
-
-
 def format_schedule(entries: list[dict], heading: str) -> str:
     if not entries:
         return f"**{heading}**\nNo scheduled days."
@@ -406,7 +381,7 @@ class WorkoutBot(commands.Bot):
                         entries,
                         "Continued workout schedule",
                     )
-                entries = await asyncio.to_thread(upcoming_schedule, target_date)
+                entries = await asyncio.to_thread(latest_schedule_block)
                 message = await self.post_tracked_schedule(
                     entries,
                     "Workout schedule",
@@ -616,10 +591,7 @@ class WorkoutBot(commands.Bot):
         if channel is None:
             channel = await self.fetch_channel(self.channel_id)
         message = await channel.fetch_message(int(message_id))
-        entries = await asyncio.to_thread(
-            upcoming_schedule,
-            datetime.now(self.timezone).date(),
-        )
+        entries = await asyncio.to_thread(latest_schedule_block)
         content = format_schedule(entries, "Workout schedule")
         if message.content == content:
             return
