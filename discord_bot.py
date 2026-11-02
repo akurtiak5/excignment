@@ -119,12 +119,6 @@ def ensure_schedule_contains(target_date: date) -> list[list[dict]]:
         continued_schedules.append(continued_state["schedule"][previous_length:])
 
 
-def continue_schedule() -> list[dict]:
-    previous_length = len(read_schedule_state()["schedule"])
-    run_scheduler("continue")
-    return read_schedule_state()["schedule"][previous_length:]
-
-
 def upcoming_schedule(target_date: date) -> list[dict]:
     state = read_schedule_state()
     with CONFIG_FILE.open("r", encoding="utf-8") as file:
@@ -378,6 +372,7 @@ class WorkoutBot(commands.Bot):
                 view=daily_workout_view(target_date),
                 allowed_mentions=discord.AllowedMentions.none(),
             )
+            state = read_bot_state()
             state["last_sent_date"] = target_date.isoformat()
             write_bot_state(state)
             logger.info("Posted workout for %s", target_date)
@@ -426,12 +421,30 @@ class WorkoutBot(commands.Bot):
                         "No schedule exists yet. Run /start first.", ephemeral=True
                     )
                     return
-                entries = await asyncio.to_thread(continue_schedule)
-                message = await self.post_tracked_schedule(
-                    entries,
-                    "Continued workout schedule",
+                state = read_bot_state()
+                tracked_message_id = state.get("schedule_message_id")
+                if tracked_message_id is None:
+                    await interaction.followup.send(
+                        "No tracked schedule message exists. Run /start first.",
+                        ephemeral=True,
+                    )
+                    return
+
+                channel = self.get_channel(self.channel_id)
+                if channel is None:
+                    channel = await self.fetch_channel(self.channel_id)
+                tracked_message = await channel.fetch_message(
+                    int(tracked_message_id)
                 )
-            except (OSError, ValueError, subprocess.CalledProcessError) as error:
+                message = await self.post_tracked_schedule_content(
+                    tracked_message.content
+                )
+            except (
+                OSError,
+                ValueError,
+                subprocess.CalledProcessError,
+                discord.HTTPException,
+            ) as error:
                 await interaction.followup.send(
                     f"Could not continue the schedule: {self.error_detail(error)}",
                     ephemeral=True,
@@ -439,7 +452,7 @@ class WorkoutBot(commands.Bot):
                 return
 
             await interaction.followup.send(
-                f"Continuation posted and tracked as message {message.id}.",
+                f"Schedule reposted and tracked as message {message.id}.",
                 ephemeral=True,
             )
 
@@ -541,11 +554,16 @@ class WorkoutBot(commands.Bot):
         entries: list[dict],
         heading: str,
     ) -> discord.Message:
+        return await self.post_tracked_schedule_content(
+            format_schedule(entries, heading)
+        )
+
+    async def post_tracked_schedule_content(self, content: str) -> discord.Message:
         channel = self.get_channel(self.channel_id)
         if channel is None:
             channel = await self.fetch_channel(self.channel_id)
         message = await channel.send(
-            content=format_schedule(entries, heading),
+            content=content,
             allowed_mentions=discord.AllowedMentions.none(),
         )
         state = read_bot_state()
