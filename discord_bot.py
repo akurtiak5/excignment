@@ -106,6 +106,21 @@ def read_schedule_state() -> dict:
         return json.load(file)
 
 
+def toggle_config_setting(setting: str) -> bool:
+    if setting not in {"wednesday_run", "all_runs"}:
+        raise ValueError("Setting must be wednesday_run or all_runs.")
+
+    with CONFIG_FILE.open("r", encoding="utf-8") as file:
+        config = json.load(file)
+
+    enabled = not config.get(setting, True)
+    config[setting] = enabled
+    with CONFIG_FILE.open("w", encoding="utf-8") as file:
+        json.dump(config, file, indent=2)
+        file.write("\n")
+    return enabled
+
+
 def ensure_schedule_contains(target_date: date) -> list[list[dict]]:
     continued_schedules = []
     while True:
@@ -299,6 +314,46 @@ class WorkoutBot(commands.Bot):
         )
         async def reroll_command(interaction: discord.Interaction) -> None:
             await self.reroll_schedule_command(interaction)
+
+        @self.tree.command(
+            name="toggle",
+            description="Toggle a workout scheduling setting",
+        )
+        @discord.app_commands.choices(
+            setting=[
+                discord.app_commands.Choice(
+                    name="Wednesday run",
+                    value="wednesday_run",
+                ),
+                discord.app_commands.Choice(
+                    name="All runs",
+                    value="all_runs",
+                ),
+            ],
+        )
+        async def toggle_command(
+            interaction: discord.Interaction,
+            setting: discord.app_commands.Choice[str],
+        ) -> None:
+            await interaction.response.defer(ephemeral=True)
+            async with self.schedule_lock:
+                try:
+                    enabled = await asyncio.to_thread(
+                        toggle_config_setting,
+                        setting.value,
+                    )
+                except (OSError, ValueError, json.JSONDecodeError) as error:
+                    await interaction.followup.send(
+                        f"Could not toggle the setting: {self.error_detail(error)}",
+                        ephemeral=True,
+                    )
+                    return
+
+            state = "enabled" if enabled else "disabled"
+            await interaction.followup.send(
+                f"{setting.name} {state}.",
+                ephemeral=True,
+            )
 
     async def setup_hook(self) -> None:
         self.add_dynamic_items(CompleteWorkoutButton, SkipWorkoutButton)

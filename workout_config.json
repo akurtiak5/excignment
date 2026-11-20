@@ -3,6 +3,8 @@
   "week_length_days": 7,
   "candidate_attempts": 2000,
   "fixed_run_weekday": 2,
+  "wednesday_run": true,
+  "all_runs": true,
   "skip_streak_exemption_length": 4,
   "minimum_hip_workouts": 7,
   "weekend_days": [5, 6],

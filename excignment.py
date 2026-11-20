@@ -29,6 +29,8 @@ class SchedulerConfig:
     week_length_days: int
     candidate_attempts: int
     fixed_run_weekday: int | None
+    wednesday_run: bool
+    all_runs: bool
     skip_streak_exemption_length: int
     minimum_hip_workouts: int
     weekend_days: tuple[int, ...]
@@ -62,7 +64,12 @@ def load_config(path: Path) -> SchedulerConfig:
         "hip_interval_weights",
         "score_weights",
     }
-    if not isinstance(data, dict) or set(data) != required_keys:
+    optional_keys = {"wednesday_run", "all_runs"}
+    if (
+        not isinstance(data, dict)
+        or not required_keys.issubset(data)
+        or set(data) - required_keys - optional_keys
+    ):
         raise ValueError(
             f"Config '{path}' must contain exactly these settings: "
             + ", ".join(sorted(required_keys))
@@ -129,6 +136,8 @@ def load_config(path: Path) -> SchedulerConfig:
                 if data["fixed_run_weekday"] is None
                 else int(data["fixed_run_weekday"])
             ),
+            wednesday_run=data.get("wednesday_run", True),
+            all_runs=data.get("all_runs", True),
             skip_streak_exemption_length=int(
                 data["skip_streak_exemption_length"]
             ),
@@ -163,6 +172,11 @@ def load_config(path: Path) -> SchedulerConfig:
         )
     except (AttributeError, KeyError, TypeError, ValueError) as error:
         raise ValueError(f"Invalid value in config '{path}': {error}") from error
+
+    if not isinstance(config.wednesday_run, bool) or not isinstance(
+        config.all_runs, bool
+    ):
+        raise ValueError("wednesday_run and all_runs must be booleans.")
 
     if config.horizon_days < 1 or config.week_length_days < 1:
         raise ValueError("horizon_days and week_length_days must be positive.")
@@ -483,6 +497,9 @@ class WorkoutScheduler:
         Target the configured number of runs per week, including a fixed weekday run.
         Respect spacing from previous runs.
         """
+        if not self.config.all_runs:
+            return
+
         cooldown = self.config.cooldown_days["run"]
         last_run_index = -cooldown
         
@@ -667,7 +684,9 @@ class WorkoutScheduler:
                 continue
 
             if (
-                self.config.fixed_run_weekday is not None
+                self.config.all_runs
+                and self.config.wednesday_run
+                and self.config.fixed_run_weekday is not None
                 and day.date.weekday() == self.config.fixed_run_weekday
             ):
                 day.workouts.append("run")
@@ -714,7 +733,8 @@ class WorkoutScheduler:
 
             run_target = self.config.weekly_targets["run"]
             if (
-                counts["run"] < run_target["preferred_max"]
+                self.config.all_runs
+                and counts["run"] < run_target["preferred_max"]
                 and self._can_place(schedule, index, "run")
             ):
                 deficit = max(
@@ -809,7 +829,7 @@ class WorkoutScheduler:
     ) -> bool:
         day = schedule[index]
 
-        if day.skipped:
+        if day.skipped or day.date in self.fixed_workouts:
             return False
 
         if workout in day.workouts:
@@ -894,7 +914,9 @@ class WorkoutScheduler:
 
         for day in schedule:
             if (
-                self.config.fixed_run_weekday is not None
+                self.config.all_runs
+                and self.config.wednesday_run
+                and self.config.fixed_run_weekday is not None
                 and day.date.weekday() == self.config.fixed_run_weekday
                 and not day.skipped
                 and (
@@ -1054,6 +1076,8 @@ class WorkoutScheduler:
                     continue
 
                 for workout, minimum in self.config.skip_week_minimums.items():
+                    if workout == "run" and not self.config.all_runs:
+                        continue
                     workout_count = sum(
                         workout in schedule[index].workouts
                         for index in range(week_start, week_end)
@@ -1161,15 +1185,16 @@ class WorkoutScheduler:
                 * weights["leg_target_deviation_penalty"]
             )
 
-            run_target = self.config.weekly_targets["run"]
-            if run_count < run_target["preferred_min"]:
-                score -= (
-                    run_target["preferred_min"] - run_count
-                ) * weights["run_shortfall_penalty"]
-            elif run_count > run_target["preferred_max"]:
-                score -= (
-                    run_count - run_target["preferred_max"]
-                ) * weights["run_excess_penalty"]
+            if self.config.all_runs:
+                run_target = self.config.weekly_targets["run"]
+                if run_count < run_target["preferred_min"]:
+                    score -= (
+                        run_target["preferred_min"] - run_count
+                    ) * weights["run_shortfall_penalty"]
+                elif run_count > run_target["preferred_max"]:
+                    score -= (
+                        run_count - run_target["preferred_max"]
+                    ) * weights["run_excess_penalty"]
 
         # Prefer fewer combined workouts.
         for day in schedule:

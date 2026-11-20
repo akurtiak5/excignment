@@ -13,6 +13,10 @@ is kept even if it conflicts with the scheduler's normal same-day pairing rules.
 
 Weekday numbers follow Python's convention: Monday is `0`, Sunday is `6`.
 Set `fixed_run_weekday` to `null` to disable the recurring weekday run.
+The bot's `/toggle` command switches `wednesday_run` and `all_runs` between
+`true` and `false`. `wednesday_run` controls the mandatory configured weekday
+run; `all_runs` controls all automatically generated runs and takes precedence
+over `wednesday_run`. Both settings default to `true` when omitted.
 
 `horizon_days` controls the length of a newly created or continued schedule;
 `week_length_days` sets the blocks used for weekly targets. `candidate_attempts`
